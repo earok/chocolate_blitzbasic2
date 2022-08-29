@@ -7,7 +7,7 @@ It's meant to be a drop in upgrade for anyone still using OG Blitz2 (as opposed 
 
 Simply grab the "blitz2" file from this repository (or compile blitz2.s in DevPac).
 
-https://github.com/earok/chocolate_blitzbasic2/blob/main/blitz2?raw=true
+Download this rather than the zip -> https://github.com/earok/chocolate_blitzbasic2/blob/main/blitz2?raw=true
 
 The code was sourced from https://github.com/nitrologic/blitz2/tree/master/src215, with a few extraneous files removed.
 
