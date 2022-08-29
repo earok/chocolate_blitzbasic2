@@ -5,7 +5,7 @@ This is a minor update for the main Blitz Basic 2 executable ("chocolate" Blitz 
 
 It's meant to be a drop in upgrade for anyone still using OG Blitz2 (as opposed to AmiBlitz, which this will not be compatible with), it doesn't include the full install, nor does it provide any updates to the "TED" or "SuperTED" editors.
 
-Simply grab the "blitz2" file from this repository (or compile blitz2.s in DevPac).
+Simply grab the "blitz2" file from this repository (or compile blitz2.s in DevPac) to replace your existing blitz2 file (backup your existing file first!)
 
 Download this rather than the zip -> https://github.com/earok/chocolate_blitzbasic2/blob/main/blitz2?raw=true
 
