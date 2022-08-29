@@ -14,4 +14,4 @@ As of right now, there's only two notable features:
 - Removal of the "About" splash screen
 - Slightly smaller, faster and more optimized output, as some compiled "Move.l" opcodes are replaced with "MoveQ" opcodes where applicable (there may be more left to do).
 
-I've commented all code changes with "Chocolate"
+I've commented all code changes from the original Blitz Basic with "Chocolate"
