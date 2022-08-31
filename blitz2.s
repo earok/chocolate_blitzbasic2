@@ -10860,26 +10860,35 @@ fetchnum3	move	dfetch(pc),d1
 	clr	dfetch
 	rts
 .doit	cmp	#1,d2
-	beq	.word
+	beq	.word ;Byte?
 	cmp	#2,d2
-	beq	.word
+	beq	.word ;Word?
 	cmp	#3,d2
-	beq	.long
+	beq	.long ;Long?
 	cmp	#4,d2
-	beq	.long
+	beq	.long ;Quick?
 	cmp	#5,d2
-	beq	.long
+	beq	.long ;Float?
 	bra	mismatcherr
 	;
 .word	move	regat,d1
 	lsl	#8,d1
 	lsl	#1,d1
 	or	#$303c,d1
+	
+;Chocolate - this is a WORD/BYTE length constant. Apply moveq if it's within the -128 to 127 range
+	cmp.l #127,D0
+	bgt .notmoveq_word
+	cmp.l #-128,D0
+	blt .notmoveq_word
+	bra .pokemoveq
+	
+.notmoveq_word
 	bsr	pokewd
 	move	d0,d1
 	bsr	pokewd
 	bra	reget
-	;
+	
 .long	move	regat,d1
 	lsl	#8,d1
 	lsl	#1,d1
@@ -10891,18 +10900,22 @@ fetchnum3	move	dfetch(pc),d1
 	bgt .notmoveq
 	cmp.l #-128,D0
 	blt .notmoveq
-	
-	And.w #$0F00,D1 ;Fix the opcode
-	Or.w #$7000,D1
-	Or.b D0,D1
-	
-	bsr	pokewd
-	bra	reget
+	bra .pokemoveq
 	
 .notmoveq
 	bsr	pokewd
 	move.l	d0,d1
 	bsr	pokel
+	bra	reget
+		
+;D0 must be the actual value, between -128 to 127
+;D1 must be the old move opcode
+.pokemoveq
+	And.w #$0F00,D1 ;Fix the opcode
+	Or.w #$7000,D1
+	Or.b D0,D1
+	
+	bsr	pokewd
 	bra	reget
 
 ;-----------end of number fetch-------------;
