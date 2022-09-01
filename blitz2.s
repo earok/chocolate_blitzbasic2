@@ -19,6 +19,11 @@ cripple	equ	0	;set to -1 to make crippled
 final	equ	-1	;set to -1 to make final version
 version	equ	215	;version number
 
+;Chocolate - other constants
+opcodeJmp equ $4eb9
+opcodeBsr equ $6100 (the byte portion is set if it's a BYTE jump, otherwise it expects the next word to be set for a WORD jump)
+
+
 ;**************************************************;
 ;
 ;	     Modifications
@@ -3572,7 +3577,7 @@ gettokeps	;toke jsr
 
 dolibjsr	tst	d0
 	bsr	gettokeps
-	move	#$4eb9,d1
+	move	#opcodeJmp,d1
 	bsr	pokewd
 	bsr	addoff
 	move	d5,d1
@@ -3583,7 +3588,7 @@ dolibjsr	tst	d0
 
 doblibjsr	tst	d0
 	bsr	gettokeps
-	move	#$4eb9,d1
+	move	#opcodeJmp,d1
 	bsr	pokewd
 	bsr	addoff
 	move	d5,d1
@@ -3599,7 +3604,7 @@ dosysjsr	bsr	evalconst
 	bra	tokejsr
 
 dotokejsr	bsr	gettokeps
-	move	#$4eb9,d1
+	move	#opcodeJmp,d1
 	bsr	pokewd
 	move.l	pc,d3
 	btst	#7,blitzmode
@@ -10514,12 +10519,59 @@ savem	moveq	#0,d3
 	bra	pokewd
 .skip	rts	
 	
-makefjsr	move.l	d1,-(a7)
-	move	#$4eb9,d1
+;Chocolate - various JUMP commands?
+makefjsr	
+	move.l	d1,-(a7) ;Push the TARGET PC on to the stack
+	
+	;To start with, we'll get the current PC of the compiled program
+	move.l	pc,d1
+;	sub.l	pcat,d1 ;I don't know if this is necessary, or why
+	add.l  #2,d1 ;Add two to our "offset" value
+	
+	;Then we need to subtract the destination offset to get the total distance	
+	sub.l  (a7),d1
+	neg.l  d1
+	
+	;Can we get away with just a BSR.s ?
+	cmp.l 	#127,d1
+	bgt .bsrWordNeeded
+	cmp.l   #-128,d1
+	blt .bsrWordNeeded
+	
+	;If we get here, we should be able to do a BSR.S (byte sized) jump	
+	move.l	d2,-(a7) ;Temp store D2
+	move.l  d1,d2
+	move.w #opcodeBsr,D1 ;Poke the branch opcode	
+	or.b D2,d1 ;Apply the byte sized jump offset
+	move.l	(a7)+,d2 ;Restore D2
+ 
+	bsr	pokewd ;Add our byte sized jump
+	move.l	(a7)+,d1 ;Remove the target PC from the stack
+	rts
+	
+.bsrWordNeeded
+	cmp.l 	#32767,d1
+	bgt .fullJumpNeeded
+	cmp.l   #-32768,d1
+	blt .fullJumpNeeded
+	
+	;If we get here, we should be able to do a BSR.W jump
+	;Todo - optimise further to BSR.S?
+	
+	move.l	d1,-(a7) ;Store the 16 bit offset
+	move.w #opcodeBsr,D1 ;Poke the branch opcode
 	bsr	pokewd
-	bsr	addoff
-	move.l	(a7)+,d1
-	bra	pokel
+	move.l  (a7)+,d1 ;Restore the 16 bit offset
+	bsr pokewd	
+	move.l	(a7)+,d1 ;Remove the target PC from the stack
+	rts 
+	
+.fullJumpNeeded
+	move	#opcodeJmp,d1 ;Load the jump opcode
+	bsr	pokewd ;Poke the jump opcode from D1 on to the program
+	bsr	addoff ;Add the current address to the offset hunk?
+	move.l	(a7)+,d1 ;Pop the TARGET PC from the stack
+	bra	pokel ;Poke the jump address to the program. This is BRA rather than BSR to save an RTS call
 
 afunction:	;do a local function -
 	;eg a=pixel{x,y}
@@ -11282,7 +11334,7 @@ makeinits	;make any initialing jsr's
 	move	nomemleft,d1
 	bne	.yi2
 	move.l	pcat,a0
-	move	#$4eb9,(a0)+
+	move	#opcodeJmp,(a0)+
 	move.l	(a7),(a0)
 	moveq	#2,d2
 	bsr	addoff2	
@@ -11574,7 +11626,7 @@ doajsr2	move.l	libisat,a0
 	beq	.nfetch
 	add.l	a0,d1
 	move.l	d1,-(a7)
-	move	#$4eb9,d1
+	move	#opcodeJmp,d1
 	bsr	pokewd
 	move.l	(a7)+,d1
 	bra	pokel
@@ -11628,7 +11680,7 @@ doajsr2	move.l	libisat,a0
 	bra	pokecode2
 	;
 .notin	move.l	d1,-(a7)
-	move	#$4eb9,d1
+	move	#opcodeJmp,d1
 	bsr	pokewd
 	move.l	(a7)+,d1
 	bsr	addoff
@@ -13700,7 +13752,7 @@ procfixer	;fix up procs!
 	move.l	pc,-(a7)
 	;
 	move.l	a0,pc
-	move	#$4eb9,d1	;jsr
+	move	#opcodeJmp,d1	;jsr
 	bsr	pokewd
 	bsr	addoff
 	bsr	pokel
