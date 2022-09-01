@@ -1,5 +1,6 @@
 # chocolate_blitzbasic2
 
+Update 02/09/2022 - Minor improvement, JSRs to local function are replaced by BSR.s and BSR.w where applicable.
 Update 31/08/2022 - Suggested fix in order to make byte and word operations use the same MoveQ fix that long operations do.
 
 
