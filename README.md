@@ -1,4 +1,8 @@
 # chocolate_blitzbasic2
+
+Update 31/08/2022 - Suggested fix in order to make byte and word operations use the same MoveQ fix that long operations do.
+
+
 Minor update for Blitz Basic 2 (Amiga)
 
 This is a minor update for the main Blitz Basic 2 executable ("chocolate" Blitz in that it's only a minor update over "vanilla" Blitz 2).
