@@ -70,7 +70,7 @@ opcodeBsr equ $6100 (the byte portion is set if it's a BYTE jump, otherwise it e
 ;This will have to wait, as it'll fuck up all my .xtra
 ;files
 
-	include	myoffs
+	include	shared/myoffs
 ;
 ;	First, a whole lot of Library equates
 ;
@@ -258,7 +258,7 @@ errfail	equ	$d205
 mathq	equ	247-55
 
 mainbit	;
-	include	wbheader	;get 'progfile' and stack size
+	include	shared/wbheader	;get 'progfile' and stack size
 	;
 	ifeq	final
 	move.l	#4000,d2
@@ -729,24 +729,25 @@ toktnum33	dc.l	0
 	even
 
 menus	dc.b	'COMPILER',0
-	dc.b	'COMPILE AND RUN        ',0,'X'
-	dc.b	'RUN                    ',0,'M'
-	dc.b	'CREATE EXECUTABLE      ',0,'E'
-	dc.b	'COMPILER OPTIONS       ',0,'O'
-	dc.b	'CREATE RESIDENT        ',0,';'
-	dc.b	'VIEW NEWTYPES          ',0,'-'
-	dc.b	'CLI ARGUMENT           ',0,'='
-	dc.b	'CALCULATOR             ',0,'H'
-	dc.b	'RELOAD ALL LIBS        ',0,'\'
-	dc.b	'LOAD DEBUG MODULE      ',0,'.'
+	dc.b	'COMPILE AND RUN        ',0,'X' ;menu0
+	dc.b	'RUN                    ',0,'M' ;menu10
+	dc.b	'CREATE EXECUTABLE      ',0,'E' ;menu1
+	dc.b	'COMPILER OPTIONS       ',0,'O' ;menu4
+	dc.b	'CREATE RESIDENT        ',0,';' ;menu5
+	dc.b	'VIEW NEWTYPES          ',0,'-' ;menu6
+	dc.b	'CLI ARGUMENT           ',0,'=' ;menu9
+	dc.b	'CALCULATOR             ',0,'H' ;menu7
+	dc.b	'RELOAD ALL LIBS        ',0,'\' ;menu8
+	dc.b	'LOAD DEBUG MODULE      ',0,'.' ;menu_d
+	dc.b	'COMPILE AND QUIT       ',0,'/' ;menu_chocolate_create_executable_quick
 	ifeq	final
-	dc.b	'PRINT TOKENS',0,0
+	dc.b	'PRINT TOKENS',0,0 ;menu3
 	endc
 	dc.b	0
 	even
 
 menuadds	dc.l	menu0,menu10,menu1,menu4,menu5
-	dc.l	menu6,menu9,menu7,menu8,menu_d
+	dc.l	menu6,menu9,menu7,menu8,menu_d,menu_chocolate_create_executable_quick
 	ifeq	final
 	dc.l	menu3
 	endc
@@ -1571,15 +1572,46 @@ menu1	;compile/save
 	beq	.err
 .tryit	;
 	;O.K.... Now to create it
+.loop
+	bne.s .loop	
 	move.l	d0,execname
 	move	#-1,makeexec
 	move	optreqga15+12,-(a7)
-	bset	#7,optreqga15+13	;make small!
+	bset	#7,optreqga15+13	;make small!	
 	bsr	compile
 	tst	anyerrs
 	bne.s	.skip
 	bsr	savefile
 .skip	move	(a7)+,optreqga15+12
+.err	rts
+
+menu_chocolate_create_executable_quick
+	lea	xpath,a0	
+.zeroloop ;Loop through the blank space at the start of xpath to find the actual file name
+	tst.b (a0)
+	bne .zeroloopfinished
+	adda.l #1,a0
+	bra .zeroloop
+
+.zeroloopfinished
+	move.l  a0,execname
+
+	move	#-1,makeexec
+
+	move	optreqga15+12,-(a7)
+	bset	#7,optreqga15+13	;make small!	
+
+	move	optreqga10+12,-(a7)
+	bclr	#7,optreqga10+13	;disable debugger
+
+	bsr	compile
+	tst	anyerrs
+	bne.s	.skip
+	bsr	savefile
+	move	#-3,menuret ;QUIT
+.skip	
+	move	(a7)+,optreqga15+12 ;Restore "debugger"
+	move	(a7)+,optreqga15+12 ;Restore "make small"
 .err	rts
 
 docloseed	move	#-1,closeed
