@@ -1572,8 +1572,6 @@ menu1	;compile/save
 	beq	.err
 .tryit	;
 	;O.K.... Now to create it
-.loop
-	bne.s .loop	
 	move.l	d0,execname
 	move	#-1,makeexec
 	move	optreqga15+12,-(a7)
