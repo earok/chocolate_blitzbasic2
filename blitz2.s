@@ -13454,7 +13454,40 @@ doif2	;the main IF bit
 	moveq	#0,d2
 	bsr	bakevalu	;Get True/False Expression!
 	;
-	cmp	#5,d2
+;Chocolate - if the expression ended with a comparison (Scc D0 / EXT.W D0), throw away
+;the truth value and branch directly on the condition codes instead of TST/Bcc
+	cmp	#2,d2
+	bne	.nofuse
+	tst	nomemleft
+	bne	.nofuse
+	move.l	pc,a0
+	subq.l	#4,a0	;where the Scc should be
+	cmp.l	2(a7),a0	;must be within this expression's code
+	bcs	.nofuse
+	cmp	#opcodeExtW,2(a0)	;EXT.W D0?
+	bne	.nofuse
+	move	(a0),d0
+	and	#~ccMask,d0
+	cmp	#opcodeScc,d0	;Scc D0?
+	bne	.nofuse
+	move	(a0),d0
+	and	#ccMask,d0
+	cmp	#$0200,d0	;ST/SF would become BRA/BSR, leave those alone
+	bcs	.nofuse
+	;
+	move.l	a0,pc	;rewind over the Scc/EXT.W
+	tst	(a7)+	;negate flag
+	bne	.fuseneg
+	eor	#ccInvert,d0	;IF/WHILE branch away when the condition is false
+.fuseneg	move.l	posbr(pc),d1
+	swap	d1
+	and	#~ccMask,d1
+	or	d0,d1	;apply the condition
+	swap	d1
+	bsr	pokel
+	bra	.brdone
+	;
+.nofuse	cmp	#5,d2
 	beq	.float
 	move	thetst1(pc),d1
 	cmp	#1,d2
@@ -13480,8 +13513,8 @@ doif2	;the main IF bit
 	beq	.skip
 	move.l	negbr(pc),d1
 .skip	bsr	pokel
-	;	
-	moveq	#14,d0
+	;
+.brdone	moveq	#14,d0
 	moveq	#1,d1
 	move.l	4.w,a6
 	jsr	doallocmem
