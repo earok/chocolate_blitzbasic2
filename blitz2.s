@@ -8,6 +8,8 @@
 ;        like this, or I'm gonna start doing       ; 
 ;         something drastic with my life...        ;
 ;                like... GET A JOB!                ;
+;
+; RIP Mark, I love you a lot - Erik                ;
 ;                                                  ;
 ;**************************************************;
 
@@ -20,8 +22,57 @@ final	equ	-1	;set to -1 to make final version
 version	equ	215	;version number
 
 ;Chocolate - other constants
-opcodeJmp equ $4eb9
-opcodeBsr equ $6100 (the byte portion is set if it's a BYTE jump, otherwise it expects the next word to be set for a WORD jump)
+opcodeJsr equ $4eb9
+opcodeBsr equ $6100 ;(the byte portion is set if it's a BYTE jump, otherwise it expects the next word to be set for a WORD jump)
+opcodeJmp equ $4ef9 ;JMP abs.L
+opcodeBra equ $6000 ;BRA - byte portion as per opcodeBsr
+
+;Conditional branch/set. Condition code is bits 8-11, eor with ccInvert to get the opposite condition
+opcodeBcc equ $6000 ;Bcc - or in the condition code, byte portion as per opcodeBsr
+opcodeScc equ $50c0 ;Scc Dn - or in the condition code and register
+ccMask equ $0f00
+ccInvert equ $0100
+
+opcodeMoveq equ $7000 ;MOVEQ #x,Dn - register in bits 9-11, value in the byte portion
+opcodeExtW equ $4880 ;EXT.W Dn
+opcodeExtL equ $48c0 ;EXT.L Dn
+
+opcodeTstB equ $4a00 ;TST.B Dn
+opcodeTstW equ $4a40 ;TST.W Dn
+opcodeTstL equ $4a80 ;TST.L Dn
+
+;ADDQ/SUBQ #k,Dn - k (1-8, 8 encoded as 0) in bits 9-11
+opcodeAddqB equ $5000
+opcodeAddqW equ $5040
+opcodeAddqL equ $5080
+opcodeSubqB equ $5100
+opcodeSubqW equ $5140
+opcodeSubqL equ $5180
+
+;Shift #k,Dn - k (1-8, 8 encoded as 0) in bits 9-11
+opcodeLslB equ $e108
+opcodeLslW equ $e148
+opcodeLslL equ $e188
+opcodeLsrB equ $e008
+opcodeLsrW equ $e048
+opcodeLsrL equ $e088
+opcodeAsrB equ $e000
+opcodeAsrW equ $e040
+opcodeAsrL equ $e080
+
+;op #imm,Dn - register in bits 9-11, immediate data follows
+opcodeCmpiB equ $b03c
+opcodeCmpiW equ $b07c
+opcodeCmpiL equ $b0bc
+opcodeAddiW equ $d07c
+opcodeAddiL equ $d0bc
+opcodeSubiW equ $907c
+opcodeSubiL equ $90bc
+
+;CLR x(a5) - offset word follows
+opcodeClrA5B equ $422d
+opcodeClrA5W equ $426d
+opcodeClrA5L equ $42ad
 
 
 ;**************************************************;
@@ -3320,7 +3371,7 @@ sizespec2	movem.l	a2-a3,-(a7)
 sizespec	btst	#3,1(a3)
 	beq	.skip
 	bsr	sizespec2
-	or	#$7000,d1
+	or	#opcodeMoveq,d1
 	bsr	pokewd
 	addq	#1,regat
 .skip	rts
@@ -3607,7 +3658,7 @@ gettokeps	;toke jsr
 
 dolibjsr	tst	d0
 	bsr	gettokeps
-	move	#opcodeJmp,d1
+	move	#opcodeJsr,d1
 	bsr	pokewd
 	bsr	addoff
 	move	d5,d1
@@ -3618,7 +3669,7 @@ dolibjsr	tst	d0
 
 doblibjsr	tst	d0
 	bsr	gettokeps
-	move	#opcodeJmp,d1
+	move	#opcodeJsr,d1
 	bsr	pokewd
 	bsr	addoff
 	move	d5,d1
@@ -3634,7 +3685,7 @@ dosysjsr	bsr	evalconst
 	bra	tokejsr
 
 dotokejsr	bsr	gettokeps
-	move	#opcodeJmp,d1
+	move	#opcodeJsr,d1
 	bsr	pokewd
 	move.l	pc,d3
 	btst	#7,blitzmode
@@ -3649,7 +3700,7 @@ dovwait	beq	.zero
 	bsr	bakeval
 	move	fvwait(pc),d1
 	bra	.vcont
-.zero	move	#$7000,d1	;moveq #0,d0
+.zero	move	#opcodeMoveq,d1	;moveq #0,d0
 .vcont	bsr	pokewd
 	move	#intvwait,d1
 	bra	tokejsr
@@ -3712,7 +3763,7 @@ doclrint	;
 	bsr	evalconst
 	cmp.l	#14,d3
 	bcc	interr4
-	move	#$7000,d1
+	move	#opcodeMoveq,d1
 	or	d3,d1
 	bsr	pokewd
 	move	#clrint,d1
@@ -3749,7 +3800,7 @@ doseterr	move	procmode,d1
 	bsr	pokel
 	move	#seterr,d1
 	bsr	tokejsr
-	move	#$4ef9,d1	;JMP
+	move	#opcodeJmp,d1	;JMP
 	bsr	pokewd
 	move.l	pc,errjmp
 	bsr	addoff
@@ -3773,7 +3824,7 @@ setint2	bsr	errchx
 	;
 	st	intsused
 	move	d3,intlevel
-	move	#$7000,d1
+	move	#opcodeMoveq,d1
 	or	d3,d1
 	bsr	pokewd	;moveq #x,d0
 	move	#$223c,d1	;move.l #x,d1
@@ -3784,7 +3835,7 @@ setint2	bsr	errchx
 	;
 	move	#setint,d1
 	bsr	tokejsr
-	move	#$4ef9,d1	;jmp
+	move	#opcodeJmp,d1	;jmp
 	bsr	pokewd
 	bsr	addoff
 	move.l	pc,intjmpat
@@ -3888,7 +3939,7 @@ directdo	move.l	ret15add(pc),-(a7)
 	clr	procmode
 	bsr	errchx
 	;
-	move	#$4ef9,d1
+	move	#opcodeJmp,d1
 	bsr	pokewd	;JMP
 	move.l	ret15add(pc),d1
 	bsr	pokel	;jmp to done
@@ -5781,7 +5832,7 @@ sendtype	;OK, type of array is gonna be put on stack
 	move	regat,d1
 	lsl	#8,d1
 	lsl	#1,d1
-	or	#$7000,d1
+	or	#opcodeMoveq,d1
 	btst	#0,7(a3)
 	bne	.isap	;A Pointer
 	cmp.l	#256,4(a2)
@@ -8577,7 +8628,7 @@ bytetoword	;
 ;	bra	pokewd
 bytetolong	;
 	bsr	bytetoword
-wordtolong	move	#$48c0,d1
+wordtolong	move	#opcodeExtL,d1
 	or	regat,d1
 	bra	pokewd
 bytetoquick	;
@@ -8953,7 +9004,7 @@ maineval2	;
 	move	(a7)+,d1
 	;
 .hi1	addq	#2,stackuse
-	or	#$7000,d1
+	or	#opcodeMoveq,d1
 	add	#$0200,d1	;moveq #x,dREGAT+1
 	or	d2,d1
 	bsr	pokewd
@@ -9358,7 +9409,7 @@ dogecmp2	bsr	cmpit
 dogecmp	move	msge(pc),d1
 cpoke	or	regat(pc),d1
 	bsr	pokewd
-	move	#$4880,d1		;ext.w D regat
+	move	#opcodeExtW,d1		;ext.w D regat
 	or	regat(pc),d1
 	bsr	pokewd		
 	;
@@ -9506,13 +9557,13 @@ domodf	bsr	nocando	;modlib lib uses an alibjsr!
 
 ;-----------end of mod, start of DIVIDE------;
 
-dodivb	move	#$48c0,d1
+dodivb	move	#opcodeExtL,d1
 	or	regat,d1
 	bsr	pokewd
 	addq	#1,d1
 	bsr	pokewd
 	;
-dodivw	move	#$48c0,d1	;ext.l Dn
+dodivw	move	#opcodeExtL,d1	;ext.l Dn
 	or	regat,d1
 	bsr	pokewd
 	move	#$81c0,d1
@@ -9614,7 +9665,7 @@ bittst	move	#$100,d1
 	bsr	pokewd
 	;
 	move	regat,d1
-	or	#$4880,d1		;ext.w D regat
+	or	#opcodeExtW,d1		;ext.w D regat
 	bsr	pokewd		
 	;
 	moveq	#2,d2	;type now WORD!
@@ -10179,7 +10230,7 @@ libfunction	;do a user library function -
 	btst	#3,1(a3)
 	beq	.no2
 	move	6(a7),d1
-	or	#$7000,d1
+	or	#opcodeMoveq,d1
 	bsr	pokewd
 	addq	#1,regat
 	move	(a7),d1
@@ -10519,7 +10570,7 @@ varcont	cmp	#1,d2
 	;ALWAYS CONVERT BYTE TO WORD.
 	;
 	move	regat,d1
-	or	#$4880,d1	;ext.w Dn
+	or	#opcodeExtW,d1	;ext.w Dn
 	bsr	pokewd
 	;
 .notabyte	move	(a7)+,d3	;old type
@@ -10567,8 +10618,15 @@ makefjsr
 	bgt .bsrWordNeeded
 	cmp.l   #-128,d1
 	blt .bsrWordNeeded
-	
-	;If we get here, we should be able to do a BSR.S (byte sized) jump	
+
+	;A byte displacement of $00 means "word displacement follows", and $FF means
+	;"long displacement follows" on 020+, so neither can be used for BSR.S
+	tst.l	d1
+	beq .bsrWordNeeded
+	cmp.l	#-1,d1
+	beq .bsrWordNeeded
+
+	;If we get here, we should be able to do a BSR.S (byte sized) jump
 	move.l	d2,-(a7) ;Temp store D2
 	move.l  d1,d2
 	move.w #opcodeBsr,D1 ;Poke the branch opcode	
@@ -10597,7 +10655,7 @@ makefjsr
 	rts 
 	
 .fullJumpNeeded
-	move	#opcodeJmp,d1 ;Load the jump opcode
+	move	#opcodeJsr,d1 ;Load the jsr opcode
 	bsr	pokewd ;Poke the jump opcode from D1 on to the program
 	bsr	addoff ;Add the current address to the offset hunk?
 	move.l	(a7)+,d1 ;Pop the TARGET PC from the stack
@@ -10709,7 +10767,7 @@ stvar	;handle string variable get!
 .already	move	regat,d1
 	lsl	#8,d1
 	lsl	#1,d1
-	or	#$7000,d1
+	or	#opcodeMoveq,d1
 	lea	stvarget2,a0
 	move	d1,(a0)
 	move	regat,d1
@@ -10994,7 +11052,7 @@ fetchnum3	move	dfetch(pc),d1
 ;D1 must be the old move opcode
 .pokemoveq
 	And.w #$0F00,D1 ;Fix the opcode
-	Or.w #$7000,D1
+	Or.w #opcodeMoveq,D1
 	Or.b D0,D1
 	
 	bsr	pokewd
@@ -11238,7 +11296,7 @@ muld1	;generate code for #d1.w*regat
 	moveq	#0,d1
 .once	lsl	#8,d1
 	lsl	#1,d1
-	or	#$e188,d1
+	or	#opcodeLslL,d1
 	or	regat,d1
 	bra	pokewd
 .done	rts
@@ -11272,7 +11330,7 @@ makeinits	;make any initialing jsr's
 	;
 	;pass flag in d0 : non zero=auto run
 	;
-	move	#$7000,d1		;moveq #0,d0
+	move	#opcodeMoveq,d1		;moveq #0,d0
 	btst	#7,optreq2ga1+13
 	sne	d1
 	bsr	pokewd
@@ -11364,7 +11422,7 @@ makeinits	;make any initialing jsr's
 	move	nomemleft,d1
 	bne	.yi2
 	move.l	pcat,a0
-	move	#opcodeJmp,(a0)+
+	move	#opcodeJsr,(a0)+
 	move.l	(a7),(a0)
 	moveq	#2,d2
 	bsr	addoff2	
@@ -11656,7 +11714,7 @@ doajsr2	move.l	libisat,a0
 	beq	.nfetch
 	add.l	a0,d1
 	move.l	d1,-(a7)
-	move	#opcodeJmp,d1
+	move	#opcodeJsr,d1
 	bsr	pokewd
 	move.l	(a7)+,d1
 	bra	pokel
@@ -11710,7 +11768,7 @@ doajsr2	move.l	libisat,a0
 	bra	pokecode2
 	;
 .notin	move.l	d1,-(a7)
-	move	#opcodeJmp,d1
+	move	#opcodeJsr,d1
 	bsr	pokewd
 	move.l	(a7)+,d1
 	bsr	addoff
@@ -11839,7 +11897,7 @@ toreg	;d1=lib num, d2.b=reg num
 	move	d1,-(a7)
 	lsl	#8,d1
 	lsl	#1,d1
-	or	#$b07c,d1	;cmp #x,dn
+	or	#opcodeCmpiW,d1	;cmp #x,dn
 	bsr	pokewd
 	move	-4(a1),d1
 	bsr	pokewd
@@ -12330,7 +12388,7 @@ getmaxel	move	d0,d1
 	move	regat,d1
 	lsl	#8,d1
 	lsl	#1,d1
-	or	#$b07c,d1	;cmp #x,dn
+	or	#opcodeCmpiW,d1	;cmp #x,dn
 	bsr	pokewd
 	move	-4(a2),d1
 	bsr	pokewd
@@ -12395,7 +12453,7 @@ doelse	move.l	firstif,d0
 	move.l	d0,a0
 	cmp.b	#1,13(a0)
 	beq	illelseerr
-	move	#$6000,d1
+	move	#opcodeBra,d1
 	swap	d1
 	bsr	pokel
 	moveq	#0,d1
@@ -12513,7 +12571,7 @@ doread	;
 	tst.b	debugga
 	beq	.norerr
 	;
-	move	#$7000,d1
+	move	#opcodeMoveq,d1
 	move.b	d2,d1
 	and.b	#15,d1
 	bsr	pokewd
@@ -13217,7 +13275,7 @@ fillbra	;make a bra if necessary
 	;OK, we're after a case thingy. add a BRA
 	;
 	move.l	d0,a3
-	move	#$6000,d1
+	move	#opcodeBra,d1
 	bsr	pokewd	;BRA
 	moveq 	#8,d0
 	moveq	#1,d1
@@ -13340,7 +13398,7 @@ doselect	;OK, as in : SELECT opt
 
 doforever	move.l	firstrep,d0
 	beq	unterr1
-	move	#$6000,d1	;BRA
+	move	#opcodeBra,d1	;BRA
 	bsr	pokewd
 	move.l	d0,a0
 	move.l	4(a0),d1	;dest pc
@@ -13561,7 +13619,7 @@ dogoto2	move	d1,-(a7)
 eos	move	procmode,d1
 	beq	badpenderr
 	;
-	move	#$4ef9,d1
+	move	#opcodeJmp,d1
 	bsr	pokewd
 	bsr	addoff
 	;
@@ -13629,7 +13687,7 @@ dofunc2	;do some checking.....
 	move.l	memlib,a0
 	move	12(a0),memlibstat
 	bclr	#15-8,12(a0)
-	move	#$4ef9,d1	;make a jump around the proc
+	move	#opcodeJmp,d1	;make a jump around the proc
 	bsr	pokewd
 	bsr	addoff
 	bsr	pokel
@@ -13782,7 +13840,7 @@ procfixer	;fix up procs!
 	move.l	pc,-(a7)
 	;
 	move.l	a0,pc
-	move	#opcodeJmp,d1	;jsr
+	move	#opcodeJsr,d1	;jsr
 	bsr	pokewd
 	bsr	addoff
 	bsr	pokel
@@ -13950,7 +14008,7 @@ doendif3	move.l	firstif,d0
 doendif2	cmp	#1,d1
 	bne	.calcbra
 	;put in while bra
-	move	#$6000,d1
+	move	#opcodeBra,d1
 	bsr	pokewd
 	move.l	pc,a1
 	move.l	4(a0),d1
@@ -14017,7 +14075,7 @@ doend	beq	.done
 	;
 .notstate	cmp	#$8009,d0
 	bne	.notfunc
-	move	#$7000,d1
+	move	#opcodeMoveq,d1
 	bsr	pokewd
 	move.l	thisproc,a0
 	cmp.b	#7,5(a0)
@@ -14052,7 +14110,7 @@ doend	beq	.done
 	bpl	.nosp
 	;
 	move	intlevel,d1
-	or	#$7200,d1
+	or	#opcodeMoveq+$0200,d1
 	bsr	pokewd	;moveq #level,d1
 	move	#oldint,d1
 	bsr	tokejsr
@@ -14401,11 +14459,11 @@ dofor	;
 	;
 .defstep	cmp	#4,d2
 	bcc	.qup
-	move	#$7001,d1
+	move	#opcodeMoveq+1,d1	;moveq #1,d0
 	bsr	pokewd
 	bra	.pushstep
 .qup	bne	.notq
-	move	#$7001,d1
+	move	#opcodeMoveq+1,d1	;moveq #1,d0
 	bsr	pokewd
 	move	swapd0,d1
 	bsr	pokewd
