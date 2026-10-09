@@ -9610,7 +9610,8 @@ cpoke	or	regat(pc),d1
 	bsr	pokewd
 	move	#opcodeExtW,d1		;ext.w D regat
 	or	regat(pc),d1
-	bsr	pokewd		
+	bsr	pokewd
+	move.l	pc,sccendpc	;Chocolate - remember where this Scc/EXT.W pair ends for the IF fuse
 	;
 	moveq	#2,d2	;type now WORD!
 	rts
@@ -9944,7 +9945,8 @@ bittst	move	#$100,d1
 	;
 	move	regat,d1
 	or	#opcodeExtW,d1		;ext.w D regat
-	bsr	pokewd		
+	bsr	pokewd
+	move.l	pc,sccendpc	;Chocolate - remember where this Scc/EXT.W pair ends for the IF fuse
 	;
 	moveq	#2,d2	;type now WORD!
 	rts
@@ -13724,6 +13726,7 @@ unlinkrep	move.l	firstrep,a1
 	jmp	freemem(a6)
 
 iflineat	dc	0
+sccendpc	dc.l	0	;pc just after the last Scc/EXT.W pair emitted by cpoke/bittst
 doif	moveq	#0,d2	;negate flag
 doifm	moveq	#0,d1	;if flag
 	;
@@ -13740,11 +13743,21 @@ doif2	;the main IF bit
 	;
 ;Chocolate - if the expression ended with a comparison (Scc D0 / EXT.W D0), throw away
 ;the truth value and branch directly on the condition codes instead of TST/Bcc
+;
+;The pair must have been emitted by cpoke/bittst (sccendpc) - matching the bytes alone
+;could hit the tail of another instruction, e.g. a $5xC0 displacement/address word
+;followed by the EXT.W D0 of a byte->word conversion.
+;
+;NOTE: this assumes nothing in the expression branches forward to its end expecting a
+;value in D0. Such a branch would now land after the Bcc and skip the test entirely.
+;Blitz doesn't short-circuit And/Or so nothing does this today - revisit if that changes.
 	cmp	#2,d2
 	bne	.nofuse
 	tst	nomemleft
 	bne	.nofuse
 	move.l	pc,a0
+	cmp.l	sccendpc,a0	;did the expression end with a real Scc/EXT.W pair?
+	bne	.nofuse
 	subq.l	#4,a0	;where the Scc should be
 	cmp.l	2(a7),a0	;must be within this expression's code
 	bcs	.nofuse
@@ -13760,6 +13773,7 @@ doif2	;the main IF bit
 	bcs	.nofuse
 	;
 	move.l	a0,pc	;rewind over the Scc/EXT.W
+	clr.l	sccendpc	;the pair is gone
 	tst	(a7)+	;negate flag
 	bne	.fuseneg
 	eor	#ccInvert,d0	;IF/WHILE branch away when the condition is false
