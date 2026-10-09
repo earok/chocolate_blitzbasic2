@@ -10878,66 +10878,72 @@ savem	moveq	#0,d3
 	bra	pokewd
 .skip	rts	
 	
-;Chocolate - various JUMP commands?
-makefjsr	
-	move.l	d1,-(a7) ;Push the TARGET PC on to the stack
-	
-	;To start with, we'll get the current PC of the compiled program
+;Chocolate - JSR/JMP to a target PC that is already known (ie a backward one).
+;Uses BSR/BRA .S or .W where in range, otherwise JSR/JMP abs.L (with a relocation).
+;d1.l = target PC, and is preserved
+makefjmp	move.l	d2,-(a7)
+	move.l	#(opcodeBra<<16)+opcodeJmp,d2	;branch opcode in the high word, abs.L opcode in the low
+	bra	makefbranch
+
+makefjsr	move.l	d2,-(a7)
+	move.l	#(opcodeBsr<<16)+opcodeJsr,d2
+
+makefbranch	move.l	d1,-(a7) ;Push the TARGET PC on to the stack
+
+	;Displacement is from the word after the opcode. pokewd word aligns pc first, so do the same
 	move.l	pc,d1
-;	sub.l	pcat,d1 ;I don't know if this is necessary, or why
-	add.l  #2,d1 ;Add two to our "offset" value
-	
-	;Then we need to subtract the destination offset to get the total distance	
+	addq.l	#1,d1
+	bclr	#0,d1
+	addq.l	#2,d1
+
+	;Then we need to subtract the destination offset to get the total distance
 	sub.l  (a7),d1
 	neg.l  d1
-	
-	;Can we get away with just a BSR.s ?
+
+	;Can we get away with just a .S branch?
 	cmp.l 	#127,d1
-	bgt .bsrWordNeeded
+	bgt	.wordNeeded
 	cmp.l   #-128,d1
-	blt .bsrWordNeeded
+	blt	.wordNeeded
 
 	;A byte displacement of $00 means "word displacement follows", and $FF means
-	;"long displacement follows" on 020+, so neither can be used for BSR.S
+	;"long displacement follows" on 020+, so neither can be used for a .S branch
 	tst.l	d1
-	beq .bsrWordNeeded
+	beq	.wordNeeded
 	cmp.l	#-1,d1
-	beq .bsrWordNeeded
+	beq	.wordNeeded
 
-	;If we get here, we should be able to do a BSR.S (byte sized) jump
-	move.l	d2,-(a7) ;Temp store D2
-	move.l  d1,d2
-	move.w #opcodeBsr,D1 ;Poke the branch opcode	
-	or.b D2,d1 ;Apply the byte sized jump offset
-	move.l	(a7)+,d2 ;Restore D2
- 
-	bsr	pokewd ;Add our byte sized jump
-	move.l	(a7)+,d1 ;Remove the target PC from the stack
-	rts
-	
-.bsrWordNeeded
-	cmp.l 	#32767,d1
-	bgt .fullJumpNeeded
-	cmp.l   #-32768,d1
-	blt .fullJumpNeeded
-	
-	;If we get here, we should be able to do a BSR.W jump
-	;Todo - optimise further to BSR.S?
-	
-	move.l	d1,-(a7) ;Store the 16 bit offset
-	move.w #opcodeBsr,D1 ;Poke the branch opcode
+	;If we get here, we should be able to do a .S (byte sized) branch
+	swap	d2	;branch opcode
+	move.b	d1,d2	;Apply the byte sized offset
+	move	d2,d1
 	bsr	pokewd
-	move.l  (a7)+,d1 ;Restore the 16 bit offset
-	bsr pokewd	
-	move.l	(a7)+,d1 ;Remove the target PC from the stack
-	rts 
-	
+	bra	.done
+
+.wordNeeded
+	cmp.l 	#32767,d1
+	bgt	.fullJumpNeeded
+	cmp.l   #-32768,d1
+	blt	.fullJumpNeeded
+
+	;If we get here, we should be able to do a .W branch
+	swap	d2
+	exg	d1,d2	;d1 = branch opcode, d2 = 16 bit offset
+	bsr	pokewd
+	move	d2,d1
+	bsr	pokewd
+	bra	.done
+
 .fullJumpNeeded
-	move	#opcodeJsr,d1 ;Load the jsr opcode
+	move	d2,d1 ;Load the jsr/jmp opcode
 	bsr	pokewd ;Poke the jump opcode from D1 on to the program
-	bsr	addoff ;Add the current address to the offset hunk?
-	move.l	(a7)+,d1 ;Pop the TARGET PC from the stack
-	bra	pokel ;Poke the jump address to the program. This is BRA rather than BSR to save an RTS call
+	bsr	addoff ;Add the current address to the offset hunk
+	move.l	(a7),d1 ;The TARGET PC
+	bsr	pokel ;Poke the jump address to the program
+
+.done	move.l	(a7)+,d1 ;Pop the TARGET PC from the stack
+	move.l	(a7)+,d2
+	rts
 
 afunction:	;do a local function -
 	;eg a=pixel{x,y}
@@ -13921,7 +13927,19 @@ dogosub	tst.b	debugga
 dogoto	move	gotocode,d1
 dogoto2	move	d1,-(a7)
 	bsr	makealab
-	move	(a7)+,d1
+	;
+	;Chocolate - if the label is already defined (a backward jump), its PC is known,
+	;so BRA/BSR can be used where in range. Not in direct mode, as that code lives
+	;in its own buffer
+	move.l	8(a2),d1
+	beq	.forward
+	tst	dirmode
+	bne	.forward
+	cmp	#opcodeJsr,(a7)+
+	beq	makefjsr
+	bra	makefjmp
+	;
+.forward	move	(a7)+,d1
 	bsr	pokewd
 	bsr	addoff
 	move.l	8(a2),d1
