@@ -36,6 +36,10 @@ ccInvert equ $0100
 opcodeMoveq equ $7000 ;MOVEQ #x,Dn - register in bits 9-11, value in the byte portion
 opcodeExtW equ $4880 ;EXT.W Dn
 opcodeExtL equ $48c0 ;EXT.L Dn
+opcodeSwap equ $4840 ;SWAP Dn
+opcodeMoveImmW equ $303c ;MOVE.W #x,D0
+opcodeMoveImmL equ $203c ;MOVE.L #x,D0
+eaIndA2 equ $12 ;(A2) in the effective address field
 
 opcodeTstB equ $4a00 ;TST.B Dn
 opcodeTstW equ $4a40 ;TST.W Dn
@@ -1122,6 +1126,42 @@ forcompf2	;continuation
 	;
 	jsr	-42(a6)
 forcompf2f	;
+
+;Chocolate - For...Next compares for a constant STEP, where the direction is known at
+;compile time so the step's sign isn't tested every time around. Same stack layout as
+;above. ..p = positive step (index-fin), ..n = negative step (fin-index), then BGT.
+forcompbp	move.l	4(a7),a2
+	move.b	(a2),d0
+	cmp.b	3(a7),d0
+forcompbpf
+forcompbn	move.l	4(a7),a2
+	move.b	3(a7),d0
+	cmp.b	(a2),d0
+forcompbnf
+forcompwp	move.l	4(a7),a2
+	move	(a2),d0
+	cmp	2(a7),d0
+forcompwpf
+forcompwn	move.l	4(a7),a2
+	move	2(a7),d0
+	cmp	(a2),d0
+forcompwnf
+forcomplp	move.l	8(a7),a2
+	move.l	(a2),d0
+	cmp.l	4(a7),d0
+forcomplpf
+forcompln	move.l	8(a7),a2
+	move.l	4(a7),d0
+	cmp.l	(a2),d0
+forcomplnf
+forcompfp	move.l	8(a7),a2	;followed by forcompf2 as usual
+	move.l	(a2),d0
+	move.l	4(a7),d1
+forcompfpf
+forcompfn	move.l	8(a7),a2
+	move.l	4(a7),d0
+	move.l	(a2),d1
+forcompfnf
 
 swapd0	swap	d0
 
@@ -14367,6 +14407,9 @@ donext	;
 .unknown2	jsr	popnext	;error checking for next.
 	move	12(a2),d0
 	;
+	tst	14(a2)	;Chocolate - constant step that fits ADDQ/SUBQ?
+	bne	.addq
+	;
 	lea	nextb,a0
 	lea	nextbf,a1
 	cmp	#1,d0
@@ -14384,7 +14427,7 @@ donext	;
 	lea	nextf,a0
 	lea	nextff,a1
 .donext	bsr	pokecode
-	move.l	thebra(pc),d1
+.nextbra	move.l	thebra(pc),d1
 	bsr	pokel
 	;
 	move.l	firstfor,a2
@@ -14421,6 +14464,31 @@ donext	;
 	jsr	freemem(a6)
 	;
 	bra	reget
+	;
+.addq	;Chocolate - constant step of 1 to 8 (or -1 to -8): ADDQ/SUBQ straight onto the
+	;index instead of fetching the step from the stack. d0=type, a2=for struct
+	move.l	nextb,d1	;move.l 4(a7),a2
+	cmp	#3,d0
+	bcs	.addqa2
+	move.l	nextl,d1	;move.l 8(a7),a2
+.addqa2	bsr	pokel
+	move	#opcodeAddqB+eaIndA2,d3
+	cmp	#1,d0
+	beq	.addqsz
+	move	#opcodeAddqL+eaIndA2,d3
+	cmp	#3,d0
+	beq	.addqsz
+	move	#opcodeAddqW+eaIndA2,d3	;word, or the integer part of a quick
+.addqsz	move	14(a2),d1
+	bpl	.addqk
+	neg	d1
+	add	#opcodeSubqB-opcodeAddqB,d3
+.addqk	and	#7,d1	;8 is encoded as 0
+	lsl	#8,d1
+	lsl	#1,d1
+	or	d3,d1
+	bsr	pokewd
+	bra	.nextbra
 
 forset	move	#'fO',-(a7)
 
@@ -14487,10 +14555,16 @@ dofor	;
 	cmp	#$8019,d0
 	bne	.defstep
 	;
+	move.l	pc,-(a7)	;Chocolate - where the step code starts
 	bsr	eval	;get step
+	move.l	(a7)+,a0
+	move	2(a7),d2
+	bsr	conststep
 	bra	.pushstep
 	;
-.defstep	cmp	#4,d2
+.defstep	move	#1,forstep	;Chocolate - default step is a constant +1
+	move	#1,forstepq
+	cmp	#4,d2
 	bcc	.qup
 	move	#opcodeMoveq+1,d1	;moveq #1,d0
 	bsr	pokewd
@@ -14501,7 +14575,8 @@ dofor	;
 	move	swapd0,d1
 	bsr	pokewd
 	bra	.pushstep
-.notq	move	#$203c,d1
+.notq	clr	forstepq	;no ADDQ for floats
+	move	#$203c,d1
 	bsr	pokewd
 	move.l	#$80000041,d1	;ffp '1'
 	bsr	pokel
@@ -14511,6 +14586,9 @@ dofor	;
 	move	(a7)+,d2
 	move.l	(a7),a1
 	move.l	pc,4(a1)
+	move	forstepq(pc),14(a1)	;Chocolate - for NEXT
+	tst	forstep
+	bne	.knownstep
 	lea	forcompb,a0
 	lea	forcompbf,a1
 	cmp	#1,d2
@@ -14525,7 +14603,7 @@ dofor	;
 	bne	.docomp
 	lea	forcompf,a0
 	lea	forcompff,a1
-	bsr	pokecode
+.fcomp	bsr	pokecode
 	move	#getffpbase,d1
 	bsr	tokejsr
 	lea	forcompf2,a0
@@ -14536,6 +14614,111 @@ dofor	;
 	move.l	(a7)+,a1
 	move.l	pc,8(a1)
 	bra	reget
+	;
+.knownstep	;Chocolate - constant step, so the direction is known (flags from tst forstep)
+	bmi	.negstep
+	lea	forcompbp,a0
+	lea	forcompbpf,a1
+	cmp	#1,d2
+	beq	.docomp
+	lea	forcompwp,a0
+	lea	forcompwpf,a1
+	cmp	#2,d2
+	beq	.docomp
+	lea	forcomplp,a0
+	lea	forcomplpf,a1
+	cmp	#5,d2
+	bne	.docomp
+	lea	forcompfp,a0
+	lea	forcompfpf,a1
+	bra	.fcomp
+.negstep	lea	forcompbn,a0
+	lea	forcompbnf,a1
+	cmp	#1,d2
+	beq	.docomp
+	lea	forcompwn,a0
+	lea	forcompwnf,a1
+	cmp	#2,d2
+	beq	.docomp
+	lea	forcompln,a0
+	lea	forcomplnf,a1
+	cmp	#5,d2
+	bne	.docomp
+	lea	forcompfn,a0
+	lea	forcompfnf,a1
+	bra	.fcomp
+
+;Chocolate - see if the STEP expression compiled to nothing but a constant load into d0.
+;If so, set forstep to its sign (1 / -1), and forstepq to the step if NEXT can use
+;ADDQ/SUBQ (1 to 8, -1 to -8). Both are 0 if the step isn't a known constant.
+;a0=pc before the step expression, d2=type
+conststep	clr	forstep
+	clr	forstepq
+	tst	nomemleft
+	bne	.done	;can't read back the emitted code
+	move.l	pc,d1
+	sub.l	a0,d1	;length of the step code
+	move	(a0),d0
+	move	d0,d3
+	and	#$ff00,d3	;moveq's value is in the byte portion
+	cmp.l	#2,d1
+	bne	.not2
+	cmp	#opcodeMoveq,d3	;moveq #x,d0
+	bne	.done
+	ext	d0
+	ext.l	d0
+	bra	.gotval
+.not2	cmp.l	#4,d1
+	bne	.not4
+	cmp	#opcodeMoveImmW,d0	;move.w #x,d0
+	bne	.notw
+	move	2(a0),d0
+	ext.l	d0
+	bra	.gotval
+.notw	cmp	#opcodeMoveq,d3	;moveq #x,d0 / swap d0 (quick)
+	bne	.done
+	cmp	#opcodeSwap,2(a0)
+	bne	.done
+	ext	d0
+	ext.l	d0
+	swap	d0
+	bra	.gotval
+.not4	cmp.l	#6,d1
+	bne	.done
+	cmp	#opcodeMoveImmL,d0	;move.l #x,d0
+	bne	.done
+	move.l	2(a0),d0
+	;
+.gotval	move	#1,forstep
+	cmp	#5,d2
+	bne	.notf
+	btst	#7,d0	;FFP sign bit
+	beq	.done
+	move	#-1,forstep
+	rts
+.notf	cmp	#3,d2
+	bcc	.signl
+	ext.l	d0	;byte/word steps are pushed as a word
+.signl	tst.l	d0	;same test as the TST (A7) in the forcomp templates
+	bpl	.pos
+	move	#-1,forstep
+.pos	cmp	#4,d2
+	bne	.notq
+	tst	d0	;quick - ADDQ only if there's no fraction
+	bne	.done
+	swap	d0
+	ext.l	d0
+.notq	tst.l	d0
+	beq	.done
+	cmp.l	#8,d0
+	bgt	.done
+	cmp.l	#-8,d0
+	blt	.done
+	move	d0,forstepq
+.done	rts
+
+forstep	dc	0	;Chocolate - constant STEP sign: 1 / -1, or 0 if not constant
+forstepq	dc	0	;Chocolate - constant STEP for ADDQ/SUBQ, or 0
 
 thebgt	bgt	thebgt
 
