@@ -9125,7 +9125,9 @@ eval5	bsr	eval2
 	beq	.skip
 	bsr	convtypef	;could possibly fuck regat+1 !
 .skip	bsr	popprec
+	bsr	rhsconst	;Chocolate - is the rhs a lone constant load?
 	bsr	doop
+	clr	rhsok
 	;
 	;O.K., lets check the forth stack to see if last
 	;two operators are constants!
@@ -9174,6 +9176,18 @@ eval5	bsr	eval2
 	lsl	#1,d1
 	or	#$203c,d1	;move.l #x,dn
 	cmp	#3,d2
+	bcc	.fmoveq
+	ext.l	d0	;Chocolate - only the word matters
+.fmoveq	cmp.l	#127,d0	;Chocolate - moveq if it fits
+	bgt	.fnotq
+	cmp.l	#-128,d0
+	blt	.fnotq
+	and	#$0e00,d1
+	or	#opcodeMoveq,d1
+	or.b	d0,d1
+	bsr	pokewd
+	bra	.mode
+.fnotq	cmp	#3,d2
 	bcc	.ok
 	or	#$1000,d1
 	bsr	pokewd
@@ -9209,6 +9223,139 @@ eval5	bsr	eval2
 	movem.l	(a7)+,d1/a0
 	bsr	reget
 	bra	.more
+
+;Chocolate - see if the rhs of a binary operator compiled to nothing but a constant load
+;into D(regat+1): moveq #k, move.w #k or move.l #k. If it did, set rhsok, and the operator
+;routines can use getrhs to fetch the constant and droprhs to throw the load away, then
+;emit ADDQ/SUBQ, op #k, TST or shift #k instead of op D(regat+1),D(regat)
+rhsconst	clr	rhsok
+	tst	nomemleft
+	bne	.done	;can't read back the emitted code
+	movem.l	d0-d3/a1,-(a7)
+	move.l	forthsp(pc),a1
+	tst	-2(a1)	;is the rhs a constant?
+	bne	.no
+	move.l	-14(a1),d0
+	cmp.l	firstoff,d0	;no relocations were added for it
+	bne	.no
+	move.l	-18(a1),a1	;where the rhs code starts
+	move.l	a1,d0
+	btst	#0,d0
+	bne	.no	;odd, so not a lone instruction
+	move.l	pc,d1
+	sub.l	a1,d1	;length of the rhs code
+	move	regat(pc),d3
+	addq	#1,d3
+	lsl	#8,d3
+	lsl	#1,d3	;D(regat+1) in bits 9-11
+	move	(a1)+,d0
+	cmp.l	#2,d1
+	bne	.not2
+	move	d0,d2
+	and	#$ff00,d2	;moveq's value is in the byte portion
+	or	#opcodeMoveq,d3
+	cmp	d3,d2	;moveq #k,D(regat+1)
+	bne	.no
+	ext	d0
+	ext.l	d0
+	bra	.got
+.not2	cmp.l	#4,d1
+	bne	.not4
+	or	#opcodeMoveImmW,d3
+	cmp	d3,d0	;move.w #k,D(regat+1)
+	bne	.no
+	move	(a1),d0
+	ext.l	d0
+	bra	.got
+.not4	cmp.l	#6,d1
+	bne	.no
+	or	#opcodeMoveImmL,d3
+	cmp	d3,d0	;move.l #k,D(regat+1)
+	bne	.no
+	move.l	(a1),d0
+.got	move.l	d0,rhsval
+	move	d1,rhslen
+	move.l	pc,d0
+	move.l	d0,rhsend
+	sub.l	d1,d0
+	move.l	d0,rhsat
+	move	#-1,rhsok
+.no	movem.l	(a7)+,d0-d3/a1
+.done	rts
+
+;Chocolate - for the operator routines. If the rhs is a constant (see rhsconst) and its
+;load is still the last thing emitted, return ne with the constant in d0.l. Else eq.
+getrhs	move.l	pc,d0
+	cmp.l	rhsend(pc),d0
+	beq	.same
+	clr	rhsok	;something else has been emitted since
+.same	move.l	rhsval(pc),d0
+	tst	rhsok
+	rts
+
+;Chocolate - throw away the rhs constant load
+droprhs	tst	rhsok
+	beq	.done
+	move.l	rhsat,pc
+	clr	rhsok
+.done	rts
+
+;Chocolate - if the rhs is a constant power of 2 (2 to 256), return ne with d0 = the
+;power (1 to 8). Else eq. d2=type (quicks are 16.16, so must have no fraction)
+rhspow2	bsr	getrhs
+	beq	.no
+	cmp	#4,d2
+	bne	.notq
+	tst	d0
+	bne	.no	;has a fraction
+	swap	d0
+	ext.l	d0
+.notq	cmp.l	#2,d0
+	blt	.no
+	cmp.l	#256,d0
+	bgt	.no
+	move.l	d0,d3
+	subq.l	#1,d3
+	and.l	d0,d3
+	bne	.no	;not a power of 2
+.count	addq	#1,d3
+	lsr	#1,d0
+	cmp	#1,d0
+	bne	.count
+	move	d3,d0	;ne
+	rts
+.no	moveq	#0,d0	;eq
+	rts
+
+;Chocolate - emit shift #d0,D(regat) (d0 = 1 to 8). d1=shift opcode (opcodeLslW etc)
+shiftk	and	#7,d0	;8 is encoded as 0
+	lsl	#8,d0
+	lsl	#1,d0
+	or	d0,d1
+	or	regat,d1
+	bra	pokewd
+
+;Chocolate - drop the rhs load and emit op #d0,D(regat) in place of op D(regat+1),D(regat).
+;d1=op D0,D0 (bits 6-7 the size). Not worth it for a moveq: same size, and slower for longs
+rhsimm	move	regat,d3
+	lsl	#8,d3
+	lsl	#1,d3
+	or	d3,d1
+	or	#$3c,d1	;source is #immediate
+	bsr	droprhs
+	move	d1,d3
+	bsr	pokewd
+	move.l	d0,d1
+	and	#$00c0,d3
+	cmp	#$0080,d3	;long sized?
+	beq	pokel
+	bra	pokewd
+
+rhsok	dc	0	;Chocolate - rhs is a lone constant load
+rhslen	dc	0	;its length
+rhsat	dc.l	0	;where it starts
+rhsend	dc.l	0	;where it ends
+rhsval	dc.l	0	;the constant
 
 eval2	;
 	;get 1 element and operator
@@ -9417,14 +9564,26 @@ doges	move	#strcomp,d1
 	bsr	tokejsr
 	bra	dogecmp
 
-cmpit	move	regat,d3
+cmpit	bsr	getrhs	;Chocolate - comparing against a constant?
+	bne	.const
+.reg	move	regat,d3
 	or	d3,d1
 	lsl	#8,d3
 	lsl	#1,d3
 	or	d3,d1
 	addq	#1,d1
 	bra	pokewd
-	
+.const	tst.l	d0
+	bne	.imm
+	and	#$00c0,d1	;size
+	or	#opcodeTstB,d1	;tst Dn sets the flags the same as cmp #0,Dn
+	or	regat,d1
+	bsr	droprhs
+	bra	pokewd
+.imm	cmp	#2,rhslen
+	beq	.reg	;moveq / cmp is as good as cmp #k
+	bra	rhsimm
+
 doeqcmp2	bsr	cmpit
 doeqcmp	move	mseq(pc),d1
 	bra	cpoke
@@ -9468,13 +9627,47 @@ doplusw	move	#$d040,d1
 	bra	wordtolong
 doplusl	;add regat+1 to regat
 	move	#$d080,d1
-doplus2	move	regat,d3
+doplus2	bsr	getrhs	;Chocolate - constant rhs?
+	bne	.const
+.reg	move	regat,d3
 	or	d3,d1
 	addq	#1,d1
 	lsl	#8,d3
 	lsl	#1,d3
 	or	d3,d1
 	bra	pokewd
+	;
+.const	move	d1,d3
+	and	#$f000,d3
+	cmp	#$d000,d3	;add?
+	beq	.addsub
+	cmp	#$9000,d3	;sub?
+	bne	.imm
+.addsub	cmp.l	#8,d0
+	bgt	.imm
+	cmp.l	#-8,d0
+	blt	.imm
+	cmp	#$9000,d3
+	bne	.add
+	neg.l	d0	;subtracting k is adding -k
+.add	and	#$00c0,d1	;size
+	or	#opcodeAddqB,d1
+	tst.l	d0
+	beq	.zero
+	bpl	.pos
+	neg.l	d0
+	or	#opcodeSubqB-opcodeAddqB,d1
+.pos	and	#7,d0	;8 is encoded as 0
+	lsl	#8,d0
+	lsl	#1,d0
+	or	d0,d1
+	or	regat,d1
+	bsr	droprhs
+	bra	pokewd
+.zero	bra	droprhs	;adding 0, so nothing to do
+.imm	cmp	#2,rhslen
+	beq	.reg	;moveq / op is as good as op #k
+	bra	rhsimm
 
 doplusf	;
 	;ffp add
@@ -9527,18 +9720,40 @@ dominusf	move	#-72,d1
 ;	moveq	#2,d2	;now a word
 ;	rts
 
-dotimesb	move	#$c1c0,d1
-	moveq	#2,d2	;now a word
-	bra	doplus2
-	
-dotimesw	move	#$c1c0,d1
-	moveq	#3,d2	;now a long.
+dotimesb	moveq	#2,d2	;now a word
+	bsr	rhspow2	;Chocolate - times a power of 2? Shift instead
+	beq	.mul
+	bsr	droprhs
+	move	#opcodeLslW,d1
+	bra	shiftk
+.mul	move	#$c1c0,d1
 	bra	doplus2
 
-dotimesq	move	#quickmult,d1
+dotimesw	moveq	#3,d2	;now a long.
+	bsr	rhspow2	;Chocolate - times a power of 2? Shift instead
+	beq	.mul
+	bsr	droprhs
+	move	d0,-(a7)
+	bsr	wordtolong	;muls.w sign extends the word first
+	move	(a7)+,d0
+	move	#opcodeLslL,d1
+	bra	shiftk
+.mul	move	#$c1c0,d1
+	bra	doplus2
+
+dotimesq	bsr	rhspow2	;Chocolate - times a power of 2? Shift instead
+	bne	timespow2
+	move	#quickmult,d1
 	bra	domylib
 
-dotimesl	move	#longmult,d1
+;Chocolate - shift instead of calling longmult/quickmult. d0=power of 2 from rhspow2
+timespow2	bsr	droprhs
+	move	#opcodeLslL,d1
+	bra	shiftk
+
+dotimesl	bsr	rhspow2	;Chocolate - times a power of 2? Shift instead
+	bne	timespow2
+	move	#longmult,d1
 domylib	move	d1,-(a7)
 	bsr	savereg
 	move.l	d4,d1
@@ -9672,7 +9887,30 @@ doasrl	move	#$e0a0,d1
 
 ;-----------end of ASR----------------------; 
 
-shpoke	move	d1,-(a7)
+shpoke	bsr	getrhs	;Chocolate - shift by a constant 1 to 8?
+	beq	.notconst
+	cmp	#4,d2
+	bne	.notq
+	tst	d0
+	bne	.notconst	;has a fraction
+	swap	d0	;the count is the integer part
+	ext.l	d0
+.notq	subq.l	#1,d0
+	cmp.l	#7,d0
+	bhi	.notconst
+	addq	#1,d0
+	and	#~$0020,d1	;count is immediate
+	bsr	droprhs
+	movem	d0-d1,-(a7)
+	cmp	#4,d2	;don't fuck with quix
+	beq	.skipc
+	move	d2,d3
+	moveq	#3,d2
+	bsr	convtypef	;make first (and current) a long
+.skipc	movem	(a7)+,d0-d1
+	bra	shiftk
+	;
+.notconst	move	d1,-(a7)
 	addq	#1,regat	;make second a word!
 	move	d2,-(a7)
 	move	d2,d3
